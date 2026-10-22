@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pace Runner</title>
+<meta name="theme-color" content="#F4F6F3">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one-screen running console; huge stopwatch on top, stat pair, big start/stop bar at the thumb. */
+:root{
+  --bg:#F4F6F3; --surface:#FFFFFF; --fg:#111814; --muted:#56625A; --line:#D3DAD4;
+  --accent:#D9480F; --accent-fg:#FFFFFF; --good:#2B8A3E; --warn:#B7791F; --bad:#C92A2A;
+  --display:"Barlow Condensed","Arial Narrow",Arial,sans-serif;
+  --body:"Barlow",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0E1210; --surface:#171D19; --fg:#EEF2EE; --muted:#9CA8A0; --line:#2B342E;
+  --accent:#FF6B2C; --accent-fg:#140A04; --good:#51CF66; --warn:#FCC419; --bad:#FF6B6B;
+  color-scheme:dark;
+}}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:22px;line-height:1.35;
+  padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0px) max(16px,env(safe-area-inset-left,0px));
+  -webkit-tap-highlight-color:transparent}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px;padding-block:14px 28px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+h1{font-family:var(--display);font-weight:700;font-size:1.6rem;letter-spacing:.02em;margin:0;text-transform:uppercase}
+.gps{display:flex;align-items:center;gap:8px;font-size:1.05rem;font-weight:600;color:var(--muted)}
+.dot{width:16px;height:16px;border-radius:50%;background:var(--bad);flex:none}
+.gps.ok .dot{background:var(--good)} .gps.weak .dot{background:var(--warn)}
+.label{font-size:1rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.num{font-family:var(--display);font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+.clock .num{font-size:clamp(5.5rem,27vw,9rem);font-weight:700}
+.dist .num{font-size:clamp(4.2rem,20vw,6.5rem)}
+.dist .unit{font-family:var(--display);font-size:2.2rem;font-weight:600;color:var(--muted);margin-left:6px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px;border-top:2px solid var(--line);padding-top:14px}
+.pair .num{font-size:clamp(3rem,13vw,4.4rem)}
+.pair small{font-family:var(--display);font-size:1.4rem;color:var(--muted)}
+.last{font-size:1.25rem;color:var(--muted);min-height:1.6em}
+.last b{color:var(--fg);font-weight:600}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+button,select,input{font:inherit;color:inherit}
+.btn{border:0;border-radius:14px;padding:22px 12px;font-family:var(--display);font-size:2.2rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;cursor:pointer;min-height:88px}
+.btn:focus-visible,select:focus-visible,input:focus-visible,.link:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.go{background:var(--accent);color:var(--accent-fg);grid-column:1/-1}
+.pause{background:var(--fg);color:var(--bg)}
+.stop{background:transparent;color:var(--fg);border:3px solid var(--fg)}
+.btn:disabled{opacity:.35}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:14px}
+.panel h2{font-family:var(--display);font-size:1.7rem;margin:0;text-transform:uppercase;letter-spacing:.03em}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+select,input[type=text]{background:var(--bg);border:2px solid var(--line);border-radius:10px;padding:10px 12px;font-size:1.3rem;min-width:0}
+input[type=text]{width:6.5em;text-align:center;font-variant-numeric:tabular-nums}
+.link{background:none;border:0;color:var(--accent);font-weight:600;font-size:1.15rem;padding:6px 0;cursor:pointer;text-decoration:underline;text-underline-offset:4px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:1.25rem}
+th{text-align:left;font-size:.95rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;padding:6px 4px;border-bottom:2px solid var(--line)}
+td{padding:8px 4px;border-bottom:1px solid var(--line)}
+td:not(:first-child),th:not(:first-child){text-align:right}
+.note{font-size:1.05rem;color:var(--muted)}
+.empty{color:var(--muted);font-size:1.15rem}
+@media (prefers-reduced-motion:no-preference){.btn{transition:transform .08s}.btn:active{transform:scale(.98)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Pace Runner</h1>
+    <div class="gps" id="gps" role="status"><span class="dot"></span><span id="gpsText">No GPS</span></div>
+  </header>
+
+  <section class="clock" aria-label="Time">
+    <div class="label" id="countLabel">Time</div>
+    <div class="num" id="time">0:00</div>
+  </section>
+
+  <section class="dist" aria-label="Distance">
+    <div class="label">Distance</div>
+    <div><span class="num" id="dist">0.00</span><span class="unit">km</span></div>
+  </section>
+
+  <section class="pair">
+    <div><div class="label">Pace now</div><div class="num" id="paceNow">–:––</div><small>/km</small></div>
+    <div><div class="label">Avg pace</div><div class="num" id="paceAvg">–:––</div><small>/km</small></div>
+  </section>
+
+  <div class="last" id="last" aria-live="polite"></div>
+
+  <div class="controls" id="controls">
+    <button class="btn go" id="startBtn">Start</button>
+    <button class="btn pause" id="pauseBtn" hidden>Pause</button>
+    <button class="btn stop" id="stopBtn" hidden>Finish</button>
+  </div>
+
+  <section class="panel" id="summary" hidden>
+    <h2>Last run</h2>
+    <div id="summaryBody"></div>
+  </section>
+
+  <section class="panel" id="settings">
+    <h2>Settings</h2>
+    <div class="row"><label for="interval">Announce every</label>
+      <select id="interval"><option value="500">500 m</option><option value="1000">1 km</option></select></div>
+    <div class="row"><label for="delay">Countdown before start</label>
+      <select id="delay"><option value="0">None</option><option value="5">5 s</option><option value="10">10 s</option><option value="15">15 s</option><option value="20">20 s</option><option value="30">30 s</option><option value="45">45 s</option><option value="60">60 s</option></select></div>
+    <div class="row"><label for="target">Target pace (min:sec)</label>
+      <input type="text" id="target" inputmode="numeric" placeholder="off" autocomplete="off"></div>
+    <div class="row"><label for="voiceOn">Voice</label>
+      <select id="voiceOn"><option value="1">On</option><option value="0">Off</option></select></div>
+    <div class="row"><button class="link" id="testVoice">Test the voice</button></div>
+    <p class="note" id="voiceStatus" aria-live="polite"></p>
+    <p class="note">Keep the screen on while you run. The app keeps it awake, but if the phone locks, GPS stops.</p>
+  </section>
+
+  <section class="panel">
+    <h2>History</h2>
+    <div id="history"></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(id){return document.getElementById(id)};
+
+  // ---------- storage ----------
+  function load(k,d){try{var v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}}
+  function save(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}
+
+  var settings=load("pr_settings",{interval:500,target:"",voice:"1",delay:15});
+  if(settings.delay==null) settings.delay=15;
+  $("interval").value=String(settings.interval);
+  $("delay").value=String(settings.delay);
+  $("target").value=settings.target||"";
+  $("voiceOn").value=settings.voice;
+  function storeSettings(){
+    settings={interval:+$("interval").value,target:$("target").value.trim(),voice:$("voiceOn").value,delay:+$("delay").value};
+    save("pr_settings",settings);
+  }
+  ["interval","target","voiceOn","delay"].forEach(function(id){$(id).addEventListener("change",storeSettings)});
+
+  // ---------- formatting ----------
+  function clock(sec){
+    sec=Math.max(0,Math.round(sec));
+    var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60;
+    return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(s).padStart(2,"0");
+  }
+  function paceStr(secPerKm){
+    if(!isFinite(secPerKm)||secPerKm<=0||secPerKm>3600) return "–:––";
+    return clock(secPerKm);
+  }
+  function plural(n,w){return n+" "+w+(n===1?"":"s")}
+  function sayDuration(sec,joiner){
+    sec=Math.round(sec);
+    var h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60,parts=[];
+    if(h) parts.push(plural(h,"hour"));
+    if(m||h) parts.push(plural(m,"minute"));
+    if(s||(!m&&!h)) parts.push(plural(s,"second"));
+    return parts.join(joiner);
+  }
+  function sayDistance(m){
+    if(m<1000) return m+" meters";
+    var km=m/1000;
+    var t=(km%1===0)?String(km):km.toFixed(1);
+    return t+(km===1?" kilometer":" kilometers");
+  }
+  function parseTarget(t){
+    var m=/^\s*(\d{1,2})[:.,\s](\d{1,2})\s*$/.exec(t||"");
+    if(!m){var only=/^\s*(\d{1,2})\s*$/.exec(t||"");return only?(+only[1])*60:0}
+    return (+m[1])*60+(+m[2]);
+  }
+
+  // ---------- voice ----------
+  var voice=null;
+  function pickVoice(){
+    if(!("speechSynthesis" in window)) return;
+    var vs=speechSynthesis.getVoices();
+    voice=vs.find(function(v){return v.lang==="en-US"&&/google|samantha|aaron/i.test(v.name)})||
+          vs.find(function(v){return v.lang==="en-US"})||
+          vs.find(function(v){return /^en/i.test(v.lang)})||null;
+  }
+  if("speechSynthesis" in window){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
+  function speak(text,force,onDone){
+    if(!("speechSynthesis" in window)) return false;
+    if(!force&&settings.voice==="0") return false;
+    try{
+      if(!voice) pickVoice();
+      speechSynthesis.cancel();            // clears a stuck queue (Android Chrome)
+      speechSynthesis.resume();
+      var u=new SpeechSynthesisUtterance(text);
+      u.lang="en-US"; if(voice) u.voice=voice; u.rate=0.95; u.volume=1;
+      if(onDone){u.onstart=function(){onDone("ok")};u.onerror=function(e){onDone("err",e.error)}}
+      speechSynthesis.speak(u);
+      return true;
+    }catch(e){if(onDone)onDone("err",e.message);return false}
+  }
+  $("testVoice").addEventListener("click",function(){
+    var st=$("voiceStatus");
+    if(!("speechSynthesis" in window)){
+      st.textContent="This browser has no voice. Open the file in Chrome, not in a file preview.";return;
+    }
+    st.textContent="Speaking…";
+    var heard=false;
+    speak("500 meters, time 3 minutes, 20 seconds, pace 6 minutes 40 seconds per kilometer",true,function(r,why){
+      heard=true;
+      st.textContent=r==="ok"?"Voice works.":"Voice error: "+(why||"unknown")+". Check the phone's text-to-speech settings.";
+    });
+    setTimeout(function(){
+      if(heard) return;
+      var n=speechSynthesis.getVoices().length;
+      st.textContent=n?"No sound after 4 s. Check media volume and the phone's text-to-speech engine.":"No voices installed. Install or enable “Speech Services by Google”.";
+    },4000);
+  });
+
+  // ---------- geo ----------
+  var R=6371000;
+  function hav(a,b){
+    var toR=Math.PI/180,dLat=(b.lat-a.lat)*toR,dLon=(b.lon-a.lon)*toR;
+    var x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a.lat*toR)*Math.cos(b.lat*toR)*Math.sin(dLon/2)*Math.sin(dLon/2);
+    return 2*R*Math.asin(Math.sqrt(x));
+  }
+
+  var state="idle"; // idle | running | paused
+  var startedAt=0,pausedTotal=0,pauseStart=0;
+  var dist=0,lastPt=null,glitches=0,trail=[];
+  var nextMark=500,lastMarkTime=0,splits=[];
+  var gpsAcc=null,watchId=null,wake=null,tick=null;
+
+  function elapsed(){
+    if(state==="idle") return 0;
+    var now=state==="paused"?pauseStart:Date.now();
+    return (now-startedAt-pausedTotal)/1000;
+  }
+
+  function setGps(acc){
+    gpsAcc=acc;
+    var el=$("gps");el.classList.remove("ok","weak");
+    if(acc==null){$("gpsText").textContent="No GPS";return}
+    el.classList.add(acc<=20?"ok":"weak");
+    $("gpsText").textContent="GPS ±"+Math.round(acc)+" m";
+  }
+
+  function startWatch(){
+    if(watchId!=null) return;
+    if(!("geolocation" in navigator)){$("gpsText").textContent="No GPS here";return}
+    watchId=navigator.geolocation.watchPosition(onPos,function(err){
+      $("gpsText").textContent=err.code===1?"Location blocked":"GPS error";
+    },{enableHighAccuracy:true,maximumAge:0,timeout:20000});
+  }
+
+  function onPos(p){
+    var c=p.coords; setGps(c.accuracy);
+    if(state!=="running") return;
+    if(c.accuracy>30) return;
+    var pt={lat:c.latitude,lon:c.longitude,t:p.timestamp||Date.now()};
+    if(!lastPt){lastPt=pt;return}
+    var d=hav(lastPt,pt),dt=(pt.t-lastPt.t)/1000;
+    if(d<3) return;                       // GPS jitter while standing
+    if(dt>0&&d/dt>9){                      // impossible jump for a runner
+      if(++glitches>=3){lastPt=pt;glitches=0}
+      return;
+    }
+    glitches=0; dist+=d; lastPt=pt;
+    trail.push({t:elapsed(),d:dist});
+    while(trail.length>2&&trail[0].t<elapsed()-30) trail.shift();
+    checkMarks();
+    render();
+  }
+
+  function checkMarks(){
+    var iv=settings.interval;
+    while(dist>=nextMark){
+      var t=elapsed(),splitSec=t-lastMarkTime,pace=splitSec/(iv/1000);
+      splits.push({m:nextMark,t:t,split:splitSec,pace:pace});
+      var msg=sayDistance(nextMark)+", time "+sayDuration(t,", ")+", pace "+sayDuration(pace," ")+" per kilometer";
+      var tg=parseTarget(settings.target);
+      if(tg){
+        var diff=Math.round(pace-tg);
+        if(Math.abs(diff)<=3) msg+=". On target";
+        else msg+=". "+plural(Math.abs(diff),"second")+(diff<0?" faster":" slower")+" than target";
+      }
+      speak(msg);
+      $("last").innerHTML="Last "+(iv===1000?"km":"500 m")+": <b>"+clock(splitSec)+"</b> · pace <b>"+paceStr(pace)+"</b> /km";
+      lastMarkTime=t; nextMark+=iv;
+    }
+  }
+
+  function render(){
+    var t=elapsed();
+    $("time").textContent=clock(t);
+    $("dist").textContent=(dist/1000).toFixed(2);
+    $("paceAvg").textContent=dist>50?paceStr(t/(dist/1000)):"–:––";
+    var now="–:––";
+    if(trail.length>=2&&state==="running"){
+      var a=trail[0],b=trail[trail.length-1],dd=b.d-a.d,tt=b.t-a.t;
+      if(dd>15&&tt>5) now=paceStr(tt/(dd/1000));
+      if(t-b.t>10) now="–:––";
+    }
+    $("paceNow").textContent=now;
+  }
+
+  async function keepAwake(){
+    try{if("wakeLock" in navigator&&!wake){wake=await navigator.wakeLock.request("screen");wake.addEventListener("release",function(){wake=null})}}catch(e){}
+  }
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="visible"&&state!=="idle") keepAwake();
+  });
+
+  function showButtons(){
+    $("startBtn").hidden=state!=="idle";
+    $("pauseBtn").hidden=state==="idle";
+    $("stopBtn").hidden=state==="idle";
+    $("pauseBtn").textContent=state==="paused"?"Resume":"Pause";
+    $("settings").hidden=state!=="idle";
+  }
+
+  // ---------- countdown before the run ----------
+  var cdTimer=null,cdEnd=0,cdTotal=0,cdLast=null;
+  function cancelCountdown(){
+    clearInterval(cdTimer); cdTimer=null; cdLast=null;
+    if("speechSynthesis" in window) speechSynthesis.cancel();
+    $("startBtn").textContent="Start"; $("startBtn").classList.remove("pause");
+    $("countLabel").textContent="Time"; $("settings").hidden=false;
+    render();
+  }
+  function cdTick(){
+    var r=Math.ceil((cdEnd-Date.now())/1000);
+    if(r<=0){
+      clearInterval(cdTimer); cdTimer=null;
+      $("countLabel").textContent="Time";
+      $("startBtn").textContent="Start"; $("startBtn").classList.remove("pause");
+      speak("Go!",false);
+      beginRun();
+      return;
+    }
+    $("time").textContent=r;
+    if(r!==cdLast){
+      cdLast=r;
+      if(r<=5 || (r%10===0 && r<cdTotal)) speak(String(r),false);
+    }
+  }
+  $("startBtn").addEventListener("click",function(){
+    if(cdTimer){cancelCountdown();return}
+    storeSettings();
+    startWatch(); keepAwake();
+    var delay=+settings.delay||0;
+    if(!delay){speak("Go!",false);beginRun();return}
+    speak("Starting in "+delay+" seconds",false);   // also unlocks speech on phones
+    cdTotal=delay; cdEnd=Date.now()+delay*1000; cdLast=delay;
+    $("countLabel").textContent="Starting in";
+    $("startBtn").textContent="Cancel"; $("startBtn").classList.add("pause");
+    $("settings").hidden=true; $("summary").hidden=true;
+    $("time").textContent=delay;
+    cdTimer=setInterval(cdTick,200);
+  });
+
+  function beginRun(){
+    state="running"; startedAt=Date.now(); pausedTotal=0;
+    dist=0; lastPt=null; trail=[]; splits=[]; glitches=0;
+    nextMark=settings.interval; lastMarkTime=0;
+    $("last").textContent=""; $("summary").hidden=true;
+    showButtons(); render();
+    tick=setInterval(render,250);
+  }
+
+  $("pauseBtn").addEventListener("click",function(){
+    if(state==="running"){state="paused";pauseStart=Date.now();speak("Paused")}
+    else if(state==="paused"){pausedTotal+=Date.now()-pauseStart;state="running";lastPt=null;trail=[];speak("Resumed")}
+    showButtons(); render();
+  });
+
+  var finishArmed=false,armTimer=null;
+  $("stopBtn").addEventListener("click",function(){
+    if(!finishArmed){                     // two taps, so a pocket bump can't end the run
+      finishArmed=true; $("stopBtn").textContent="Tap again";
+      armTimer=setTimeout(function(){finishArmed=false;$("stopBtn").textContent="Finish"},3000);
+      return;
+    }
+    clearTimeout(armTimer); finishArmed=false; $("stopBtn").textContent="Finish";
+    if(state==="paused") pausedTotal+=Date.now()-pauseStart;
+    var t=(Date.now()-startedAt-pausedTotal)/1000;
+    state="idle"; clearInterval(tick);
+    if(wake){try{wake.release()}catch(e){} wake=null}
+    var run={date:new Date().toISOString(),dist:dist,time:t,interval:settings.interval,splits:splits.map(function(s){return{m:s.m,split:s.split,pace:s.pace}})};
+    var avg=dist>50?t/(dist/1000):0;
+    speak("Run finished. "+(dist/1000).toFixed(2)+" kilometers in "+sayDuration(t,", ")+(avg?". Average pace "+sayDuration(avg," ")+" per kilometer":""));
+    if(dist>50||t>60){var h=load("pr_history",[]);h.unshift(run);save("pr_history",h.slice(0,30))}
+    showSummary(run); renderHistory(); showButtons();
+    $("time").textContent=clock(t);
+  });
+
+  function splitsTable(run){
+    if(!run.splits.length) return '<p class="empty">No full '+(run.interval===1000?"kilometers":"500 m sections")+' yet.</p>';
+    var rows=run.splits.map(function(s){
+      return "<tr><td>"+(s.m>=1000?(s.m/1000).toFixed(s.m%1000?1:0)+" km":s.m+" m")+"</td><td>"+clock(s.split)+"</td><td>"+paceStr(s.pace)+"</td></tr>";
+    }).join("");
+    return '<div style="overflow-x:auto"><table><thead><tr><th>Mark</th><th>Split</th><th>Pace</th></tr></thead><tbody>'+rows+"</tbody></table></div>";
+  }
+  function showSummary(run){
+    var avg=run.dist>50?run.time/(run.dist/1000):0;
+    $("summaryBody").innerHTML=
+      '<div class="row"><span>Distance</span><b class="num" style="font-size:2.4rem">'+(run.dist/1000).toFixed(2)+' km</b></div>'+
+      '<div class="row"><span>Time</span><b class="num" style="font-size:2.4rem">'+clock(run.time)+'</b></div>'+
+      '<div class="row"><span>Avg pace</span><b class="num" style="font-size:2.4rem">'+paceStr(avg)+' /km</b></div>'+
+      splitsTable(run);
+    $("summary").hidden=false;
+  }
+  function renderHistory(){
+    var h=load("pr_history",[]);
+    if(!h.length){$("history").innerHTML='<p class="empty">Your runs will appear here after you tap Finish.</p>';return}
+    $("history").innerHTML='<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>km</th><th>Time</th><th>Pace</th></tr></thead><tbody>'+
+      h.map(function(r,i){
+        var d=new Date(r.date),avg=r.dist>50?r.time/(r.dist/1000):0;
+        return '<tr data-i="'+i+'" style="cursor:pointer"><td>'+(d.getMonth()+1)+"/"+d.getDate()+"</td><td>"+(r.dist/1000).toFixed(2)+"</td><td>"+clock(r.time)+"</td><td>"+paceStr(avg)+"</td></tr>";
+      }).join("")+"</tbody></table></div>"+'<p class="note">Tap a run to see its splits.</p>';
+    Array.prototype.forEach.call($("history").querySelectorAll("tr[data-i]"),function(tr){
+      tr.addEventListener("click",function(){showSummary(h[+tr.dataset.i]);$("summary").scrollIntoView({behavior:"smooth"})});
+    });
+  }
+
+  renderHistory(); showButtons(); render();
+  startWatch();   // warm up GPS before the run starts
+})();
+</script>
+</body>
+</html>
