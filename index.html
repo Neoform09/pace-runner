@@ -67,6 +67,108 @@ td:not(:first-child),th:not(:first-child){text-align:right}
 </style>
 </head>
 <body>
+<style>
+#appsync{margin:12px 14px;padding:16px 18px;border-radius:16px;border:3px solid #c8643b;background:#fff4ee;color:#1c1b19;font:500 26px/1.35 system-ui,-apple-system,"Segoe UI",sans-serif}
+#appsync[hidden]{display:none!important}
+#appsync b{display:block;font-size:30px;margin-bottom:6px}
+#appsync .as-msg{margin:0 0 12px}
+#appsync .as-row{display:flex;gap:10px;flex-wrap:wrap}
+#appsync input{flex:1 1 220px;min-width:0;font:600 28px system-ui,sans-serif;padding:12px 14px;border:2px solid #b9b3a8;border-radius:12px;background:#fff;color:#1c1b19}
+#appsync button{font:700 28px system-ui,sans-serif;padding:12px 22px;border:0;border-radius:12px;background:#1c1b19;color:#fff;cursor:pointer}
+#appsync .as-x{background:transparent;color:#6f6b63;padding:12px 8px;font-weight:600}
+@media (prefers-color-scheme:dark){#appsync{background:#2d231e;color:#eeebe4;border-color:#e3855c}#appsync input{background:#161513;color:#eeebe4;border-color:#4a463f}#appsync button{background:#eeebe4;color:#161513}#appsync .as-x{background:transparent;color:#a29d93}}
+</style>
+<div id="appsync" hidden>
+  <b>Send this log to Claude</b>
+  <p class="as-msg" id="appsync-msg">Enter your password once. After that, everything you save is sent automatically.</p>
+  <div class="as-row"><input id="appsync-pass" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="password" aria-label="Password"><button id="appsync-save" type="button">Save</button><button id="appsync-later" class="as-x" type="button">Later</button></div>
+</div>
+<script>
+// Sends saved entries to Igor's "App Logs" Google Sheet. Shared by all his phone apps.
+window.AppSync = (function () {
+  var URL = "https://script.google.com/macros/s/AKfycbztATiu4PQzOnIuSqcF1AocXGo1RfsupmiqJVyFjFSRJUl5Jb_bS2Y8YTTcJ5IZwO19YQ/exec";
+  var KQ = "appsync-queue", KP = "appsync-pass", KL = "appsync-later";
+  function get(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+  function put(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  var busy = false, box, msg;
+
+  function showBox(text) {
+    if (!box) return;
+    if (text) msg.textContent = text;
+    box.hidden = false;
+  }
+  function setup() {
+    box = document.getElementById("appsync"); msg = document.getElementById("appsync-msg");
+    if (!box) return;
+    if (box.parentNode !== document.body || document.body.firstElementChild !== box) document.body.insertBefore(box, document.body.firstChild);
+    document.getElementById("appsync-save").addEventListener("click", function () {
+      var p = document.getElementById("appsync-pass").value.trim().toLowerCase();
+      if (!p) return;
+      put(KP, p); put(KL, 0); box.hidden = true; msg.textContent = "Checking…";
+      check();
+    });
+    document.getElementById("appsync-later").addEventListener("click", function () { put(KL, Date.now()); box.hidden = true; });
+    if (!get(KP, "") && Date.now() - get(KL, 0) > 12 * 3600 * 1000) showBox();
+    setTimeout(flush, 1500);
+  }
+
+  function post(body) {
+    return fetch(URL, { method: "POST", body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+  }
+  // Called after a password is typed: confirms it right away, even with nothing to send.
+  function check() {
+    var pass = get(KP, "");
+    post({ key: pass, app: "_check", id: "check" }).then(function (r) {
+      if (r && r.error === "password") { put(KP, ""); showBox("That password didn't work. Please type it again."); return; }
+      flush();
+    }).catch(function () { flush(); });
+  }
+
+  function send(app, entry) {
+    if (!entry || !entry.id) return;
+    var q = get(KQ, []).filter(function (x) { return !(x.app === app && x.id === entry.id); });
+    q.push({ app: app, id: String(entry.id), date: entry.date || "", summary: entry.summary || "", details: entry.details || {} });
+    put(KQ, q.slice(-500));
+    flush();
+  }
+
+  function flush() {
+    if (busy) return;
+    var q = get(KQ, []);
+    if (!q.length) return;
+    var pass = get(KP, "");
+    if (!pass) { if (Date.now() - get(KL, 0) > 12 * 3600 * 1000) showBox(); return; }
+    if (navigator.onLine === false) return;
+    busy = true;
+    var item = q[0];
+    post({ key: pass, app: item.app, id: item.id, date: item.date, summary: item.summary, details: item.details })
+      .then(function (r) {
+        busy = false;
+        if (r && r.ok) {
+          put(KQ, get(KQ, []).filter(function (x) { return !(x.app === item.app && x.id === item.id && x.summary === item.summary); }));
+          flush();
+        } else if (r && r.error === "password") {
+          put(KP, ""); showBox("That password didn't work. Please type it again.");
+        }
+      })
+      .catch(function () { busy = false; });
+  }
+
+  // Sends an app's existing history once, the first time this code runs on the phone.
+  function backfill(name, fn) {
+    if (get("appsync-bf-" + name, 0)) return;
+    try { fn(); put("appsync-bf-" + name, 1); } catch (e) {}
+  }
+
+  window.addEventListener("online", flush);
+  document.addEventListener("visibilitychange", function () { if (document.visibilityState === "visible") flush(); });
+  setInterval(flush, 60000);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", setup); else setup();
+  return { send: send, flush: flush, backfill: backfill };
+})();
+</script>
+
+
 <div class="wrap">
   <header>
     <h1>Pace Runner</h1>
@@ -388,11 +490,21 @@ td:not(:first-child),th:not(:first-child){text-align:right}
     var run={date:new Date().toISOString(),dist:dist,time:t,interval:settings.interval,splits:splits.map(function(s){return{m:s.m,split:s.split,pace:s.pace}})};
     var avg=dist>50?t/(dist/1000):0;
     speak("Run finished. "+(dist/1000).toFixed(2)+" kilometers in "+sayDuration(t,", ")+(avg?". Average pace "+sayDuration(avg," ")+" per kilometer":""));
-    if(dist>50||t>60){var h=load("pr_history",[]);h.unshift(run);save("pr_history",h.slice(0,30))}
+    if(dist>50||t>60){var h=load("pr_history",[]);h.unshift(run);save("pr_history",h.slice(0,30));syncRun(run)}
     showSummary(run); renderHistory(); showButtons();
     $("time").textContent=clock(t);
   });
 
+  function syncRun(r){
+    try{
+      if(!window.AppSync) return;
+      var avg=r.dist>50?r.time/(r.dist/1000):0;
+      AppSync.send("Pace Runner",{id:"run-"+r.date,date:r.date.slice(0,10),
+        summary:(r.dist/1000).toFixed(2)+" km in "+clock(r.time)+(avg?", avg pace "+paceStr(avg)+" /km":""),
+        details:{start:r.date,distance_m:Math.round(r.dist),time_s:Math.round(r.time),
+          splits:(r.splits||[]).map(function(s){return{at_m:s.m,split:clock(s.split),pace:paceStr(s.pace)}})}});
+    }catch(e){}
+  }
   function splitsTable(run){
     if(!run.splits.length) return '<p class="empty">No full '+(run.interval===1000?"kilometers":"500 m sections")+' yet.</p>';
     var rows=run.splits.map(function(s){
@@ -423,6 +535,7 @@ td:not(:first-child),th:not(:first-child){text-align:right}
   }
 
   renderHistory(); showButtons(); render();
+  if(window.AppSync) AppSync.backfill("pace",function(){load("pr_history",[]).forEach(syncRun)});
   startWatch();   // warm up GPS before the run starts
 })();
 </script>
